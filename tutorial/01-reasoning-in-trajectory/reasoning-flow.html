@@ -1,0 +1,809 @@
+<title>Reasoning 会留在轨迹里吗</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@700;900&display=swap">
+<style>
+/* Layout: a three-stage pipeline (SDK → server → template) driven by one control bar, then a verdict matrix and a source index. */
+:root {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #eef1f6;
+  --fg: #18202b;
+  --muted: #586374;
+  --line: #d9dee6;
+  --accent: #2a55c9;
+  --think: #7442c0;
+  --think-bg: #f1eafb;
+  --keep: #23804f;
+  --keep-bg: #e5f4ec;
+  --drop: #c03a33;
+  --drop-bg: #fbe9e7;
+  --code-bg: #f7f8fb;
+  --font-display: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151b;
+    --surface: #181e26;
+    --surface-2: #202834;
+    --fg: #e5e9ef;
+    --muted: #9aa5b4;
+    --line: #2b3440;
+    --accent: #87a8ff;
+    --think: #bb9af2;
+    --think-bg: #2a2140;
+    --keep: #63c690;
+    --keep-bg: #183126;
+    --drop: #f2867e;
+    --drop-bg: #3a1f1d;
+    --code-bg: #141920;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151b;
+  --surface: #181e26;
+  --surface-2: #202834;
+  --fg: #e5e9ef;
+  --muted: #9aa5b4;
+  --line: #2b3440;
+  --accent: #87a8ff;
+  --think: #bb9af2;
+  --think-bg: #2a2140;
+  --keep: #63c690;
+  --keep-bg: #183126;
+  --drop: #f2867e;
+  --drop-bg: #3a1f1d;
+  --code-bg: #141920;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.7;
+}
+.wrap {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding-inline: 20px;
+  padding-block: 40px 64px;
+  display: grid;
+  gap: 40px;
+}
+@media (max-width: 520px) { .wrap { padding-inline: 16px; padding-block: 24px 48px; gap: 32px; } }
+
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: 0.01em; }
+h1 { font-size: clamp(28px, 4.6vw, 44px); font-weight: 900; line-height: 1.25; }
+h2 { font-size: 22px; font-weight: 700; line-height: 1.4; }
+h3 { font-size: 15px; margin: 0; font-weight: 700; }
+p { margin: 0; }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+.muted { color: var(--muted); }
+.eyebrow { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+
+/* Header */
+header { display: grid; gap: 16px; max-width: 820px; }
+.lede { font-size: 17px; color: var(--muted); max-width: 70ch; }
+.answer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.answer > div {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.answer b { font-size: 15px; }
+.answer .k { font-size: 12px; color: var(--muted); letter-spacing: 0.06em; }
+
+/* Controls */
+.controls {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 5;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  padding-block: 12px;
+  display: grid;
+  gap: 10px;
+}
+.ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ctl-label { font-size: 12px; color: var(--muted); width: 64px; flex: none; letter-spacing: 0.04em; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label {
+  cursor: pointer;
+  font-size: 13px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.seg label small { color: var(--muted); font-size: 11.5px; margin-left: 4px; }
+.seg input:checked + label { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.seg input:checked + label small { color: var(--bg); opacity: 0.85; }
+.seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg input:disabled + label { opacity: 0.4; cursor: not-allowed; }
+.ctl-note { font-size: 12.5px; color: var(--muted); }
+
+/* Verdict strip */
+.verdict { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface);
+}
+.pill.ok { background: var(--keep-bg); border-color: transparent; color: var(--keep); }
+.pill.no { background: var(--drop-bg); border-color: transparent; color: var(--drop); }
+.pill b { font-family: var(--font-mono); font-weight: 600; }
+
+/* Pipeline */
+.pipeline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) 28px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+}
+.arrow { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 18px; }
+@media (max-width: 960px) {
+  .pipeline { grid-template-columns: minmax(0, 1fr); }
+  .arrow { height: 28px; transform: rotate(90deg); }
+}
+.stage {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+.stage-head { display: grid; gap: 2px; }
+.stage-num { font-family: var(--font-mono); font-size: 12px; color: var(--accent); font-weight: 600; letter-spacing: 0.04em; }
+.stage-sub { font-size: 12.5px; color: var(--muted); }
+.items { display: grid; gap: 6px; list-style: none; margin: 0; padding: 0; }
+.item {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 4px 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.item .role { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); padding-top: 1px; }
+.item .body { min-width: 0; overflow-wrap: anywhere; }
+.item .kind { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); display: block; }
+.item.reasoning { background: var(--think-bg); }
+.item.reasoning .kind { color: var(--think); font-weight: 600; }
+.item.dropped { background: transparent; border: 1px dashed var(--line); }
+.item.dropped .text { text-decoration: line-through; color: var(--muted); }
+.item.absent { display: none; }
+.why {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  display: flex; gap: 6px; align-items: baseline;
+}
+.why .tag { flex: none; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 4px; }
+.why .tag.ok { background: var(--keep-bg); color: var(--keep); }
+.why .tag.no { background: var(--drop-bg); color: var(--drop); }
+.why code { font-size: 11px; }
+
+.prompt-box { display: grid; gap: 6px; }
+.prompt-box .cap { font-size: 12px; color: var(--muted); }
+pre {
+  margin: 0;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--fg);
+}
+pre .think { color: var(--think); font-weight: 600; }
+pre .special { color: var(--muted); }
+pre .shared { color: var(--muted); }
+pre .diverge { background: var(--drop-bg); color: var(--drop); }
+
+/* Matrix */
+.section { display: grid; gap: 14px; }
+.section > p { max-width: 75ch; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 640px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; font-size: 12px; color: var(--muted); background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+tbody tr.row-btn { cursor: pointer; }
+tbody tr.row-btn:hover td, tbody tr.row-btn:focus-visible td { background: var(--surface-2); }
+tbody tr.row-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+tbody tr.current td { background: var(--surface-2); }
+tbody tr.current td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.cell-ok { color: var(--keep); font-weight: 500; }
+.cell-no { color: var(--drop); font-weight: 500; }
+.cell-sub { display: block; font-size: 11.5px; color: var(--muted); font-weight: 400; }
+
+/* Notes */
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+.note {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+}
+.note ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.note code, .answer code, .section > p code { overflow-wrap: anywhere; }
+.section { min-width: 0; }
+.src td:first-child { white-space: nowrap; }
+.src code { overflow-wrap: anywhere; }
+footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .item, .pill { transition: background-color 160ms ease, border-color 160ms ease; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">Agent Harness 学习笔记 · 第 01 课</span>
+    <h1>Reasoning 会留在轨迹里吗？</h1>
+    <p class="lede">用一个天气查询例子，跟踪模型的 reasoning 从 OpenAI Agents SDK 出发，经过服务器，再被 chat template 渲染成 token 的全过程。切换下方的接入方式、后端和请求序号，看每一层保留了什么、丢掉了什么。</p>
+    <div class="answer">
+      <div><span class="k">① SDK 层</span><b>默认保留并原样回传</b><span class="muted">Chat Completions 的 <code>reasoning_content</code> 字段例外</span></div>
+      <div><span class="k">② 服务器层</span><b>vLLM 通用路径不裁剪</b><span class="muted">OpenAI 看 <code>reasoning.context</code>；gpt-oss 由 vLLM 裁剪</span></div>
+      <div><span class="k">③ 模板层</span><b>多数模型：回合内保留，跨回合丢弃</b><span class="muted">只渲染最后一条用户消息之后的 reasoning</span></div>
+    </div>
+  </header>
+
+  <section class="section" aria-labelledby="explorer-title">
+    <h2 id="explorer-title">逐层查看</h2>
+    <p class="muted">例子：用户问 “上海天气怎么样？”，模型思考（rs_1）后调用 <code>get_weather</code>；拿到结果后再思考（rs_2）并回答；随后用户追问 “那北京呢？”。一共三次模型请求。</p>
+
+    <div class="controls">
+      <div class="ctl-row">
+        <span class="ctl-label">接入方式</span>
+        <fieldset class="seg" id="api-seg">
+          <input type="radio" name="api" id="api-responses" value="responses" checked><label for="api-responses">Responses API</label>
+          <input type="radio" name="api" id="api-chat-r" value="chat_r"><label for="api-chat-r">Chat Completions<small>reasoning 字段</small></label>
+          <input type="radio" name="api" id="api-chat-rc" value="chat_rc"><label for="api-chat-rc">Chat Completions<small>reasoning_content（旧）</small></label>
+        </fieldset>
+      </div>
+      <div class="ctl-row">
+        <span class="ctl-label">后端</span>
+        <fieldset class="seg" id="backend-seg">
+          <input type="radio" name="backend" id="be-qwen3" value="qwen3" checked><label for="be-qwen3">vLLM · Qwen3</label>
+          <input type="radio" name="backend" id="be-gptoss" value="gptoss"><label for="be-gptoss">vLLM · gpt-oss</label>
+          <input type="radio" name="backend" id="be-dsv4" value="dsv4"><label for="be-dsv4">vLLM · DeepSeek V4</label>
+          <input type="radio" name="backend" id="be-oai56" value="oai56"><label for="be-oai56">OpenAI · GPT-5.6</label>
+          <input type="radio" name="backend" id="be-oaiold" value="oaiold"><label for="be-oaiold">OpenAI · 更早的推理模型</label>
+        </fieldset>
+      </div>
+      <div class="ctl-row">
+        <span class="ctl-label">请求</span>
+        <fieldset class="seg" id="step-seg">
+          <input type="radio" name="step" id="step-1" value="1"><label for="step-1">请求 1<small>用户提问</small></label>
+          <input type="radio" name="step" id="step-2" value="2"><label for="step-2">请求 2<small>工具结果回传</small></label>
+          <input type="radio" name="step" id="step-3" value="3" checked><label for="step-3">请求 3<small>下一个用户回合</small></label>
+        </fieldset>
+      </div>
+      <p class="ctl-note" id="ctl-note"></p>
+      <div class="verdict" id="verdict" aria-live="polite"></div>
+    </div>
+
+    <div class="pipeline">
+      <div class="stage">
+        <div class="stage-head">
+          <span class="stage-num">① SDK</span>
+          <h3>SDK 发出的请求</h3>
+          <span class="stage-sub" id="sdk-sub"></span>
+        </div>
+        <ul class="items" id="sdk-items"></ul>
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="stage">
+        <div class="stage-head">
+          <span class="stage-num">② 服务器</span>
+          <h3>服务器解析后</h3>
+          <span class="stage-sub" id="srv-sub"></span>
+        </div>
+        <ul class="items" id="srv-items"></ul>
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="stage">
+        <div class="stage-head">
+          <span class="stage-num">③ 模板</span>
+          <h3>模型实际看到的</h3>
+          <span class="stage-sub" id="tpl-sub"></span>
+        </div>
+        <ul class="items" id="tpl-items"></ul>
+        <div class="prompt-box" id="prompt-box">
+          <span class="cap" id="prompt-cap"></span>
+          <pre id="prompt-pre"></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="matrix-title">
+    <h2 id="matrix-title">总表：模型能不能看到旧 reasoning</h2>
+    <p class="muted">“回合内” 指请求 2 中的 rs_1（工具调用循环中）；“跨回合” 指请求 3 中的 rs_1 和 rs_2（新用户消息之后）。✗ 后面标注是哪一层丢弃的。点击任意一行，上方的逐层视图会切换到该组合。</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>接入方式</th><th>后端</th><th>回合内 · 请求 2 的 rs_1</th><th>跨回合 · 请求 3 的 rs_1</th><th>跨回合 · 请求 3 的 rs_2</th></tr></thead>
+        <tbody id="matrix-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cache-title">
+    <h2 id="cache-title">代价：前缀缓存在哪里断开</h2>
+    <p class="muted">以 Responses API + vLLM · Qwen3 为例。下面是请求 3 的 prompt：灰色部分与请求 2 的 prompt 完全相同，可以命中 vLLM 的前缀缓存；红色起点是第一处不同的位置。请求 2 在这里渲染了 <code>&lt;think&gt;</code>，请求 3 的模板把它删掉了，于是缓存从这里开始失效。</p>
+    <pre id="cache-pre"></pre>
+    <p class="muted" id="cache-stat"></p>
+  </section>
+
+  <section class="section" aria-labelledby="knobs-title">
+    <h2 id="knobs-title">可以调节的开关</h2>
+    <div class="two-col">
+      <div class="note">
+        <h3>Agents SDK</h3>
+        <ul>
+          <li><code>RunConfig(reasoning_item_id_policy="omit")</code>：保留 reasoning 内容，去掉 <code>rs_...</code> ID。</li>
+          <li><code>RunConfig(call_model_input_filter=...)</code>：每次请求前自由裁剪输入，例如只保留当前用户回合的 reasoning。</li>
+          <li><code>OpenAIChatCompletionsModel(..., should_replay_reasoning_content=...)</code>：控制是否回传 <code>reasoning_content</code>。</li>
+          <li><code>handoff_filters.remove_all_tools</code>：handoff 时连同 reasoning 一起删除。</li>
+          <li><code>ModelSettings(reasoning=Reasoning(context=...))</code>：OpenAI Responses 上选择 <code>current_turn</code> 或 <code>all_turns</code>。</li>
+        </ul>
+      </div>
+      <div class="note">
+        <h3>vLLM 与模板</h3>
+        <ul>
+          <li><code>chat_template_kwargs</code>：模板支持时可以改变裁剪策略，例如 Gemma 4 示例模板的 <code>preserve_thinking</code>、DeepSeek V4 的 <code>drop_thinking</code>。</li>
+          <li><code>--chat-template</code>：换一个模板，就换了一套历史 reasoning 规则。</li>
+          <li><code>VLLM_ENABLE_RESPONSES_API_STORE=1</code>：才会启用 <code>store</code>；即便开启，非 Harmony 路径用 <code>previous_response_id</code> 回放时也会跳过 reasoning。</li>
+          <li>带 <code>encrypted_content</code> 的 reasoning item 会被 vLLM 拒绝。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="src-title">
+    <h2 id="src-title">源码索引</h2>
+    <div class="table-wrap">
+      <table class="src">
+        <thead><tr><th>位置</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><code>agents: run_internal/run_loop.py:340</code></td><td><code>_prepare_turn_input_items</code>：下一步输入 = 原始输入 + 全部已生成条目</td></tr>
+          <tr><td><code>agents: run_internal/items.py:139</code></td><td><code>run_item_to_input_item</code>：不过滤 reasoning，<code>"omit"</code> 时只去掉 ID</td></tr>
+          <tr><td><code>agents: run_internal/items.py:171</code></td><td><code>drop_orphan_function_calls</code>：只删除孤立工具调用前面的 reasoning</td></tr>
+          <tr><td><code>agents: models/openai_responses.py:1105</code></td><td>删除来自其他适配器（带 <code>provider_data</code>）的 reasoning</td></tr>
+          <tr><td><code>agents: models/chatcmpl_converter.py:123</code></td><td>读取 <code>reasoning</code> / <code>reasoning_content</code>，生成 <code>ReasoningItem</code></td></tr>
+          <tr><td><code>agents: models/chatcmpl_converter.py:911</code></td><td>回传规则：<code>reasoning</code> 同模型回传；<code>reasoning_content</code> 交给钩子</td></tr>
+          <tr><td><code>agents: models/reasoning_content_replay.py:41</code></td><td>默认钩子：只对模型名含 <code>deepseek</code> 的请求回传</td></tr>
+          <tr><td><code>vllm: entrypoints/openai/chat_completion/protocol.py:522</code></td><td>把输入里的 <code>reasoning_content</code> 改名为 <code>reasoning</code></td></tr>
+          <tr><td><code>vllm: entrypoints/chat_utils.py:2039</code></td><td>assistant 消息同时设置 <code>reasoning</code> 与 <code>reasoning_content</code>，交给模板</td></tr>
+          <tr><td><code>vllm: entrypoints/openai/responses/utils.py:273</code></td><td>Responses 的 reasoning item → assistant 的 <code>reasoning</code>；拒绝 <code>encrypted_content</code></td></tr>
+          <tr><td><code>vllm: entrypoints/openai/responses/utils.py:187</code></td><td><code>previous_response_id</code> 回放时跳过 reasoning</td></tr>
+          <tr><td><code>vllm: entrypoints/openai/parser/harmony_utils.py:230</code></td><td>gpt-oss：删除最后一个 <code>final</code> 之前的 <code>analysis</code></td></tr>
+          <tr><td><code>vllm: tokenizers/deepseek_v4_encoding.py</code></td><td>DeepSeek V4：请求带工具时不丢弃历史 thinking</td></tr>
+          <tr><td><code>Qwen/Qwen3-8B: tokenizer_config.json</code></td><td>chat template：只渲染 <code>last_query_index</code> 之后的 <code>&lt;think&gt;</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    数据来源：在本地用 <code>tutorial/01-reasoning-in-trajectory/probe_reasoning_replay.py</code> 运行 Agents SDK 的真实代码路径，记录发出的请求体；Qwen3 的 prompt 文本由其官方 chat template 渲染得到；gpt-oss 的 Harmony 文本为示意（省略 system / developer 消息，并按消息换行显示）。源码版本：Agents SDK f9da374，vLLM 8a23646。OpenAI 平台行为引用自 OpenAI reasoning 指南与 openai Python 包的类型注释。
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // The full trajectory after the second user message. Each request sees a prefix of it.
+  var TRAJ = [
+    { k: "user1", role: "user", kind: "message", text: "上海天气怎么样？" },
+    { k: "rs1", role: "assistant", kind: "reasoning", id: "rs_1", text: "用户问上海天气，我需要调用 get_weather。" },
+    { k: "fc1", role: "assistant", kind: "function_call", text: "get_weather({\"city\": \"上海\"})" },
+    { k: "out1", role: "tool", kind: "function_call_output", text: "上海：晴，25°C" },
+    { k: "rs2", role: "assistant", kind: "reasoning", id: "rs_2", text: "工具返回晴 25°C，可以直接回答。" },
+    { k: "msg2", role: "assistant", kind: "message", text: "上海今天晴，25°C。" },
+    { k: "user2", role: "user", kind: "message", text: "那北京呢？" }
+  ];
+  var STEP_LEN = { 1: 1, 2: 4, 3: 7 };
+
+  var API = {
+    responses: { name: "Responses API" },
+    chat_r: { name: "Chat Completions · reasoning" },
+    chat_rc: { name: "Chat Completions · reasoning_content" }
+  };
+
+  var BACKENDS = {
+    qwen3: { name: "vLLM · Qwen3", model: "Qwen/Qwen3-8B", vendor: "vllm" },
+    gptoss: { name: "vLLM · gpt-oss", model: "openai/gpt-oss-20b", vendor: "vllm" },
+    dsv4: { name: "vLLM · DeepSeek V4", model: "deepseek-v4", vendor: "vllm" },
+    oai56: { name: "OpenAI · GPT-5.6", model: "gpt-5.6-sol", vendor: "openai" },
+    oaiold: { name: "OpenAI · 更早的推理模型", model: "gpt-5", vendor: "openai" }
+  };
+
+  function lastIndex(items, pred) {
+    for (var i = items.length - 1; i >= 0; i--) { if (pred(items[i])) return i; }
+    return -1;
+  }
+
+  // Layer 1: what the SDK puts into the request.
+  function sdkDecision(api, be, item) {
+    if (item.kind !== "reasoning") return { keep: true };
+    if (api === "responses") {
+      return { keep: true, why: "原样转换为 input item", src: "run_internal/items.py:139" };
+    }
+    if (api === "chat_r") {
+      return { keep: true, why: "来自 reasoning 字段且模型名一致，回传为 assistant.reasoning", src: "chatcmpl_converter.py:927" };
+    }
+    if (be.model.toLowerCase().indexOf("deepseek") >= 0) {
+      return { keep: true, why: "模型名含 deepseek，默认钩子回传为 reasoning_content", src: "reasoning_content_replay.py:41" };
+    }
+    return { keep: false, why: "来自 reasoning_content 且模型名不含 deepseek，默认不回传", src: "reasoning_content_replay.py:41" };
+  }
+
+  // Layer 2: what the server keeps after parsing.
+  function serverDecision(api, beKey, item, idx, items) {
+    if (item.kind !== "reasoning") return { keep: true };
+    if (beKey === "gptoss") {
+      var lastFinal = lastIndex(items, function (x) { return x.role === "assistant" && x.kind === "message"; });
+      if (idx < lastFinal) {
+        return { keep: false, why: "转成 analysis 后，删除最后一个 final 之前的 analysis", src: "harmony_utils.py:230" };
+      }
+      return { keep: true, why: "转成 analysis；之后还没有 final，保留", src: "harmony_utils.py:230" };
+    }
+    if (beKey === "dsv4") {
+      return { keep: true, why: "vLLM 编码器：请求带工具时不丢弃 thinking", src: "deepseek_v4_encoding.py" };
+    }
+    if (beKey === "oai56") {
+      return { keep: true, why: "reasoning.context 默认 all_turns", src: "OpenAI reasoning 指南" };
+    }
+    if (beKey === "oaiold") {
+      var lastUser = lastIndex(items, function (x) { return x.role === "user"; });
+      if (idx < lastUser) return { keep: false, why: "reasoning.context 默认 current_turn，不渲染早先回合", src: "OpenAI reasoning 指南" };
+      return { keep: true, why: "属于当前回合（current_turn）", src: "OpenAI reasoning 指南" };
+    }
+    if (api === "responses") {
+      return { keep: true, why: "reasoning item → assistant.reasoning，交给模板", src: "responses/utils.py:273" };
+    }
+    return { keep: true, why: "同时写入 reasoning 与 reasoning_content，交给模板", src: "chat_utils.py:2039" };
+  }
+
+  // Layer 3: what the chat template renders.
+  function templateDecision(beKey, item, idx, items) {
+    if (item.kind !== "reasoning") return { keep: true };
+    if (beKey === "qwen3") {
+      var lastUser = lastIndex(items, function (x) { return x.role === "user"; });
+      if (idx < lastUser) return { keep: false, why: "模板只渲染 last_query_index 之后的 <think>", src: "Qwen3 chat template" };
+      return { keep: true, why: "位于最后一条用户消息之后，渲染为 <think>", src: "Qwen3 chat template" };
+    }
+    if (beKey === "gptoss") return { keep: true, why: "Harmony 渲染不再裁剪（auto_drop_analysis=False）", src: "harmony_utils.py:449" };
+    if (beKey === "dsv4") return { keep: true, why: "编码器已在 ② 处理", src: "deepseek_v4_encoding.py" };
+    return { keep: true, why: "服务器内部渲染，客户端不可见", src: "" };
+  }
+
+  // Run one configuration through all three layers.
+  function simulate(api, beKey, step) {
+    var be = BACKENDS[beKey];
+    var items = TRAJ.slice(0, STEP_LEN[step]);
+    var rows = items.map(function (item, idx) {
+      var s1 = sdkDecision(api, be, item);
+      var s2 = s1.keep ? serverDecision(api, beKey, item, idx, items) : null;
+      var s3 = s2 && s2.keep ? templateDecision(beKey, item, idx, items) : null;
+      var droppedAt = !s1.keep ? 1 : (!s2.keep ? 2 : (!s3.keep ? 3 : 0));
+      return { item: item, idx: idx, s1: s1, s2: s2, s3: s3, droppedAt: droppedAt };
+    });
+    return { items: items, rows: rows };
+  }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function kindLabel(item, layer, api, beKey) {
+    if (item.kind !== "reasoning") return item.kind;
+    if (layer === 1) {
+      if (api === "responses") return "reasoning · " + item.id;
+      if (api === "chat_r") return "assistant.reasoning";
+      return "assistant.reasoning_content";
+    }
+    if (layer === 2) {
+      if (beKey === "gptoss") return "analysis 频道";
+      if (BACKENDS[beKey].vendor === "openai") return "reasoning · " + item.id;
+      return "reasoning + reasoning_content";
+    }
+    if (beKey === "qwen3") return "<think>…</think>";
+    if (beKey === "gptoss") return "<|channel|>analysis";
+    return "reasoning";
+  }
+
+  function renderStage(listId, rows, layer, api, beKey) {
+    var ul = document.getElementById(listId);
+    ul.textContent = "";
+    rows.forEach(function (r) {
+      var decision = layer === 1 ? r.s1 : (layer === 2 ? r.s2 : r.s3);
+      var li = el("li", "item");
+      if (r.item.kind === "reasoning") li.classList.add("reasoning");
+      if (decision === null) {
+        // Already removed by an earlier layer.
+        li.classList.add("dropped");
+      } else if (!decision.keep) {
+        li.classList.add("dropped");
+      }
+      li.appendChild(el("span", "role", r.item.role));
+      var body = el("div", "body");
+      body.appendChild(el("span", "kind", kindLabel(r.item, layer, api, beKey)));
+      body.appendChild(el("span", "text", r.item.text));
+      li.appendChild(body);
+      if (r.item.kind === "reasoning") {
+        var why = el("div", "why");
+        if (decision === null) {
+          why.appendChild(el("span", "tag no", "未到达"));
+          why.appendChild(el("span", "", "已在第 " + (r.droppedAt === 1 ? "①" : "②") + " 层被丢弃"));
+        } else {
+          why.appendChild(el("span", "tag " + (decision.keep ? "ok" : "no"), decision.keep ? "保留" : "丢弃"));
+          var t = el("span", "", decision.why);
+          if (decision.src) {
+            t.appendChild(document.createTextNode(" "));
+            t.appendChild(el("code", "", decision.src));
+          }
+          why.appendChild(t);
+        }
+        li.appendChild(why);
+      }
+      ul.appendChild(li);
+    });
+  }
+
+  // Build the Qwen3 prompt text exactly as its chat template does (tools section omitted).
+  function qwenPrompt(rows) {
+    var msgs = [{ role: "system", content: "你是天气助手。" }];
+    var cur = null;
+    rows.forEach(function (r) {
+      var it = r.item;
+      var visible = r.droppedAt === 0;
+      if (it.role === "user") { cur = null; msgs.push({ role: "user", content: it.text }); return; }
+      if (it.role === "tool") { cur = null; msgs.push({ role: "tool", content: it.text }); return; }
+      if (!cur) { cur = { role: "assistant", content: "", reasoning: "", tool: false }; msgs.push(cur); }
+      if (it.kind === "reasoning") { if (visible) cur.reasoning = it.text; else cur.dropped = true; }
+      else if (it.kind === "function_call") cur.tool = true;
+      else if (it.kind === "message") cur.content = it.text;
+    });
+    var lastQuery = lastIndex(msgs, function (m) { return m.role === "user"; });
+    var parts = [];
+    msgs.forEach(function (m, i) {
+      if (m.role === "system") { parts.push(["<|im_start|>system\n" + m.content + "<|im_end|>\n"]); return; }
+      if (m.role === "user") { parts.push(["<|im_start|>user\n" + m.content + "<|im_end|>\n"]); return; }
+      if (m.role === "tool") { parts.push(["<|im_start|>user\n<tool_response>\n" + m.content + "\n</tool_response><|im_end|>\n"]); return; }
+      var seg = [["<|im_start|>assistant\n"]];
+      if (i > lastQuery && m.reasoning) {
+        seg.push(["<think>\n" + m.reasoning + "\n</think>\n\n", "think"]);
+      }
+      seg.push([m.content]);
+      if (m.tool) {
+        if (m.content) seg.push(["\n"]);
+        seg.push(["<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"上海\"}}\n</tool_call>"]);
+      }
+      seg.push(["<|im_end|>\n"]);
+      seg.forEach(function (s) { parts.push(s); });
+    });
+    parts.push(["<|im_start|>assistant\n"]);
+    return parts;
+  }
+
+  // Harmony prompt sketch for gpt-oss (system and developer messages omitted).
+  function harmonyPrompt(rows) {
+    var parts = [];
+    rows.forEach(function (r) {
+      var it = r.item;
+      if (it.role === "user") parts.push(["<|start|>user<|message|>" + it.text + "<|end|>\n"]);
+      else if (it.kind === "reasoning") {
+        if (r.droppedAt === 0) parts.push(["<|start|>assistant<|channel|>analysis<|message|>" + it.text + "<|end|>\n", "think"]);
+      } else if (it.kind === "function_call") parts.push(["<|start|>assistant<|channel|>commentary to=functions.get_weather <|constrain|>json<|message|>{\"city\": \"上海\"}<|call|>\n"]);
+      else if (it.role === "tool") parts.push(["<|start|>functions.get_weather to=assistant<|channel|>commentary<|message|>" + it.text + "<|end|>\n"]);
+      else if (it.kind === "message") parts.push(["<|start|>assistant<|channel|>final<|message|>" + it.text + "<|end|>\n"]);
+    });
+    parts.push(["<|start|>assistant"]);
+    return parts;
+  }
+
+  function fillPre(pre, parts) {
+    pre.textContent = "";
+    parts.forEach(function (p) {
+      if (p[1]) pre.appendChild(el("span", p[1], p[0]));
+      else pre.appendChild(document.createTextNode(p[0]));
+    });
+  }
+
+  var state = { api: "responses", backend: "qwen3", step: 3 };
+
+  function readState() {
+    state.api = document.querySelector('input[name="api"]:checked').value;
+    state.backend = document.querySelector('input[name="backend"]:checked').value;
+    state.step = Number(document.querySelector('input[name="step"]:checked').value);
+  }
+
+  function syncInputs() {
+    document.getElementById({ responses: "api-responses", chat_r: "api-chat-r", chat_rc: "api-chat-rc" }[state.api]).checked = true;
+    document.getElementById("be-" + state.backend).checked = true;
+    document.getElementById("step-" + state.step).checked = true;
+  }
+
+  function render() {
+    var be = BACKENDS[state.backend];
+    var isOpenAI = be.vendor === "openai";
+    ["api-chat-r", "api-chat-rc"].forEach(function (id) { document.getElementById(id).disabled = isOpenAI; });
+    if (isOpenAI && state.api !== "responses") { state.api = "responses"; syncInputs(); }
+
+    var note = document.getElementById("ctl-note");
+    if (isOpenAI) {
+      note.textContent = "OpenAI 的 Chat Completions 不返回 reasoning 文本，所以 OpenAI 后端只演示 Responses API。";
+    } else if (state.api === "chat_rc") {
+      note.textContent = "当前 vLLM 只返回 reasoning 字段；reasoning_content 对应旧版 vLLM 或 DeepSeek 风格的服务器。";
+    } else {
+      note.textContent = "SDK 模型名：" + be.model + "。";
+    }
+
+    var sim = simulate(state.api, state.backend, state.step);
+    renderStage("sdk-items", sim.rows, 1, state.api, state.backend);
+    renderStage("srv-items", sim.rows, 2, state.api, state.backend);
+    renderStage("tpl-items", sim.rows, 3, state.api, state.backend);
+
+    document.getElementById("sdk-sub").textContent =
+      state.api === "responses" ? "POST /v1/responses · input[]" : "POST /v1/chat/completions · messages[]";
+    document.getElementById("srv-sub").textContent =
+      isOpenAI ? "OpenAI 服务器（reasoning.context）" :
+      state.backend === "gptoss" ? "vLLM → Harmony 消息" :
+      state.backend === "dsv4" ? "vLLM → DeepSeek V4 编码器" : "vLLM → 传给 chat template 的 messages";
+    document.getElementById("tpl-sub").textContent =
+      isOpenAI ? "由服务器渲染，客户端不可见" :
+      state.backend === "qwen3" ? "Qwen3 官方 chat template" :
+      state.backend === "gptoss" ? "openai-harmony 渲染" : "vLLM 内置编码器";
+
+    var box = document.getElementById("prompt-box");
+    var pre = document.getElementById("prompt-pre");
+    var cap = document.getElementById("prompt-cap");
+    if (state.backend === "qwen3") {
+      box.hidden = false;
+      cap.textContent = "渲染后的 prompt 文本（省略工具定义），紫色为保留下来的 reasoning：";
+      fillPre(pre, qwenPrompt(sim.rows));
+    } else if (state.backend === "gptoss") {
+      box.hidden = false;
+      cap.textContent = "Harmony 示意（省略 system / developer，按消息换行）：";
+      fillPre(pre, harmonyPrompt(sim.rows));
+    } else {
+      box.hidden = true;
+    }
+
+    var verdict = document.getElementById("verdict");
+    verdict.textContent = "";
+    var reasoningRows = sim.rows.filter(function (r) { return r.item.kind === "reasoning"; });
+    if (reasoningRows.length === 0) {
+      verdict.appendChild(el("span", "pill", "请求 1 之前还没有任何 reasoning"));
+    }
+    reasoningRows.forEach(function (r) {
+      var ok = r.droppedAt === 0;
+      var p = el("span", "pill " + (ok ? "ok" : "no"));
+      p.appendChild(el("b", "", r.item.id));
+      p.appendChild(document.createTextNode(ok ? "模型看得到" : "在第 " + "①②③".charAt(r.droppedAt - 1) + " 层被丢弃"));
+      verdict.appendChild(p);
+    });
+
+    document.querySelectorAll("#matrix-body tr").forEach(function (tr) {
+      tr.classList.toggle("current", tr.dataset.api === state.api && tr.dataset.backend === state.backend);
+    });
+
+    try { localStorage.setItem("reasoning-flow-state", JSON.stringify(state)); } catch (e) { /* Storage is optional. */ }
+  }
+
+  // Matrix of combinations.
+  var COMBOS = [
+    ["responses", "qwen3"], ["chat_r", "qwen3"], ["chat_rc", "qwen3"],
+    ["responses", "gptoss"], ["chat_r", "dsv4"], ["chat_rc", "dsv4"],
+    ["responses", "oai56"], ["responses", "oaiold"]
+  ];
+
+  function cell(sim, key) {
+    var r = sim.rows.filter(function (x) { return x.item.k === key; })[0];
+    var td = el("td");
+    if (r.droppedAt === 0) {
+      td.appendChild(el("span", "cell-ok", "✓ 可见"));
+    } else {
+      td.appendChild(el("span", "cell-no", "✗ " + ["SDK", "服务器", "模板"][r.droppedAt - 1] + " 丢弃"));
+    }
+    return td;
+  }
+
+  function buildMatrix() {
+    var body = document.getElementById("matrix-body");
+    COMBOS.forEach(function (c) {
+      var tr = el("tr", "row-btn");
+      tr.tabIndex = 0;
+      tr.dataset.api = c[0];
+      tr.dataset.backend = c[1];
+      tr.appendChild(el("td", "", API[c[0]].name));
+      tr.appendChild(el("td", "", BACKENDS[c[1]].name));
+      var s2 = simulate(c[0], c[1], 2);
+      var s3 = simulate(c[0], c[1], 3);
+      tr.appendChild(cell(s2, "rs1"));
+      tr.appendChild(cell(s3, "rs1"));
+      tr.appendChild(cell(s3, "rs2"));
+      function pick() {
+        state.api = c[0];
+        state.backend = c[1];
+        syncInputs();
+        render();
+        document.getElementById("explorer-title").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      tr.addEventListener("click", pick);
+      tr.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+      body.appendChild(tr);
+    });
+  }
+
+  function buildCacheDiff() {
+    function flat(parts) { return parts.map(function (p) { return p[0]; }).join(""); }
+    var p2 = flat(qwenPrompt(simulate("responses", "qwen3", 2).rows));
+    var p3 = flat(qwenPrompt(simulate("responses", "qwen3", 3).rows));
+    var n = 0;
+    while (n < p2.length && n < p3.length && p2.charAt(n) === p3.charAt(n)) n++;
+    var pre = document.getElementById("cache-pre");
+    pre.appendChild(el("span", "shared", p3.slice(0, n)));
+    pre.appendChild(el("span", "diverge", p3.slice(n, n + 11)));
+    pre.appendChild(document.createTextNode(p3.slice(n + 11)));
+    document.getElementById("cache-stat").textContent =
+      "请求 3 的 prompt 共 " + p3.length + " 个字符，其中前 " + n + " 个字符与请求 2 相同（按字符计，仅作示意；vLLM 实际按 token 块匹配）。请求 2 在同一位置是 “<think>”。";
+  }
+
+  document.querySelectorAll('input[name="api"], input[name="backend"], input[name="step"]').forEach(function (input) {
+    input.addEventListener("change", function () { readState(); render(); });
+  });
+
+  try {
+    var saved = JSON.parse(localStorage.getItem("reasoning-flow-state") || "null");
+    if (saved && API[saved.api] && BACKENDS[saved.backend] && STEP_LEN[saved.step]) {
+      state = saved;
+      syncInputs();
+    }
+  } catch (e) { /* Storage is optional. */ }
+
+  buildMatrix();
+  buildCacheDiff();
+  render();
+})();
+</script>
