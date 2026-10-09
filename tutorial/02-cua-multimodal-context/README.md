@@ -142,13 +142,14 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 - 参数：`--mm-processor-cache-gb`（默认 4）、`--mm-processor-cache-type`（默认 `lru`）。
 - 位置：API server 进程里的 P0 端只存元数据，EngineCore 进程里的 P1 端存预处理后的张量。命中时 API server 不再运行图片预处理，也不再通过 IPC 发送张量。
 - 在 CUA 轨迹里：每次请求重新发来的旧截图都会命中，只有最新的一张未命中。base64 解码、PIL 解码和计算哈希每次仍会执行。
-- 多个 API server 进程（或内部 DP>1）时，它会退化成每个进程独立的 `processor_only` 缓存。
+- 多个 API server 进程时（内部负载均衡的 DP>1 默认就会启动 `data_parallel_size` 个 API server），它会退化成每个进程独立的 `processor_only` 缓存：仍然省掉预处理，但每次都要通过 IPC 发送张量。
+- 纯文本模型（例如 Qwen3.8-2.4T-A95B）根本不会创建这个缓存。
 
 ### 4.3 编码器缓存
 
 - 位置：GPU worker 显存里的 `encoder_outputs[mm_hash]`，由 EngineCore 的 `EncoderCacheManager` 记账（`vllm/v1/core/encoder_cache_manager.py:19`）。
 - 跨请求共享。请求结束后条目变成“可释放”，但不会立即删除，直到新分配需要空间时才被淘汰。
-- 容量以嵌入个数计，不能直接配置：max(`max_num_batched_tokens`, 单张图最大 token 数)。H100 这类卡上默认是 8,192，大约能放 3 张 1080p 的 Kimi-K3 截图或 8 张 DeepSeek-V4.1 截图。
+- 容量以嵌入个数计，不能直接配置：max(`max_num_batched_tokens`, 单张图最大 token 数)。OpenAI 服务在 H100 这类卡上默认 `max_num_batched_tokens=8192`：DeepSeek-V4.1 单图最多 1,024 个，所以容量是 8,192，约 8 张 1080p 截图；Kimi-K3 单图最多约 16,384 个，容量随之变成约 16,384，约 6 张 1080p 截图。大规模专家并行（DeepEP 低延迟等批量 DP MoE 配置）下 `max_num_batched_tokens` 默认只有 256，编码器缓存会小到只能放一张图。
 
 ### 4.4 KV 前缀缓存
 
@@ -167,7 +168,7 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 
 ### 4.6 两种特殊注意力结构
 
-- **混合线性注意力（Qwen3.8、Kimi-K3）**：开启前缀缓存时 vLLM 把 `mamba_cache_mode` 设为 `align`，并把注意力块调大到能容纳一个线性注意力状态页。命中只能落在保存了线性注意力状态的检查点上，粒度是几百到上千个 token（TP8 下 Qwen3.8 约 1,040、Kimi-K3 约 768，为估算值）。上一张截图常常跨过命中边界，这时编码器缓存就派上用场了。
+- **混合线性注意力（Qwen3.8、Kimi-K3）**：开启前缀缓存时 vLLM 把 `mamba_cache_mode` 设为 `align`，并把注意力块调大到能容纳一个线性注意力状态页。命中只能落在保存了线性注意力状态的检查点上，粒度是几百到上千个 token（TP8、bf16 KV 下 Qwen3.8 约 1,040、Kimi-K3 约 768，为按公式推算的值）。默认 `prefix_cache_retention_interval=0` 时，每个请求只保留 prompt 末尾附近的那个检查点（向下取整到块边界），解码阶段的状态不保留，所以下一次请求的命中到不了上一轮生成的 token 里。上一张截图常常跨过命中边界，这时编码器缓存就派上用场了。`--prefix-match-unit` 可以把命中粒度设得比物理块更细，是改善这一点的主要手段。
 - **DeepSeek-V4.1**：滑动窗口 KV 不参与前缀缓存（`swa_bounded_replay=True`，默认），每次命中后要重算最后 128 个 token 来重建窗口。这 128 个 token 经常落在上一张截图里，于是那张截图需要从编码器缓存读取。
 
 ### 4.7 走一遍：4 次请求的 CUA 轨迹
@@ -188,8 +189,9 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 1. 让历史只追加：不要改写或删除旧截图，不要改写历史 reasoning（这三个模型在带工具的对话里都保留历史 reasoning，渲染结果是只追加的）。
 2. 同一张截图重发时保持字节完全一致：缓存 data URL 字符串，而不是每次重新编码。
 3. 保持 `detail` 等参数不变，避免影响哈希因子和渲染结果。
-4. 多个 data parallel 引擎时，用 `X-data-parallel-rank` 请求头把同一条轨迹固定到同一个引擎。
-5. 如果要控制上下文长度，优先在一个阶段结束时一次性压缩，而不是每一步都滑动窗口式地改写。
+4. 多个 data parallel 引擎时，内置路由按负载而不是按前缀分配请求；用 `X-data-parallel-rank` 请求头把同一条轨迹固定到同一个引擎。
+5. 混合注意力模型可以试试 `--prefix-match-unit`，让命中粒度更细。
+6. 如果要控制上下文长度，优先在一个阶段结束时一次性压缩，而不是每一步都滑动窗口式地改写。
 
 ## 5. Responses API 返回了什么
 
