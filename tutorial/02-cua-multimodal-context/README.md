@@ -98,10 +98,14 @@ D. Responses API，用 call_model_input_filter 只保留最近一张截图
 
 - **Responses API（推荐）**：每张截图都留在对应的 `function_call_output` 里，请求之间只追加。vLLM 把 `function_call_output` 原样转成 `role="tool"` 消息（`vllm/entrypoints/openai/responses/utils.py:317`），其中的图片照常解析。
 - **Chat Completions 默认**：`OpenAIChatCompletionsModel` 调用 `items_to_messages` 时没有打开 `preserve_tool_output_all_content`（`src/agents/models/openai_chatcompletions.py:621`），工具结果里的图片被丢弃。只有图片时替换成 `[tool output omitted]`（`src/agents/models/chatcmpl_converter.py:76`）并记录警告，图文混合时只剩文字。模型实际上是“盲”的。
-- **Chat Completions + 过滤器**：`call_model_input_filter` 把截图挪进紧随其后的 user 消息，user 消息里的图片会保留，前缀也保持稳定。
+- **Chat Completions + 过滤器**：`call_model_input_filter` 把截图挪进紧随其后的 user 消息，user 消息里的图片会保留，前缀也保持稳定。（对 DeepSeek-V4.1 来说两种写法差别不大：它的编码器本来就把 tool 结果并入 user 回合，紧随其后的 user 消息也会合并进同一个回合。）
 - **只保留最近 N 张**：上下文长度不再增长，但每次都会改写上一张截图的位置，前缀缓存从那里断开（见第 4 节）。
 
-### 2.4 SDK 不会替你裁剪截图
+### 2.4 每个模型的 reasoning effort 取值不同
+
+通过 `ModelSettings(reasoning=Reasoning(effort=...))` 设置的值，vLLM 会作为 chat template 参数传给模型，各模型接受的取值不同：Qwen3.8 只接受 `low` / `medium` / `xhigh`（传 `high` 会报错，而且不能关闭思考）；Kimi-K3 接受 `low` / `high` / `max`，`none` 表示关闭思考；DeepSeek-V4.1 接受 `low` / `high` / `xhigh` / `max` 或 1～100 的整数，`none` 切换到非思考模式。
+
+### 2.5 SDK 不会替你裁剪截图
 
 每一次模型调用，Runner 都从原始输入加上全部已生成条目重新构造输入（`src/agents/run_internal/run_loop.py:2521`），`call_model_input_filter` 只影响这一次请求，不改变 `result.new_items` 或 Session。持久化时要注意体积：`RunState.to_string()` 里每张截图的 base64 会出现 4 次（`generated_items` 和 `session_items` 各自的 `raw_item` 与 `output`），`SQLiteSession` 也保存完整 base64。`ModelSettings.truncation`、`context_management` 和 `OpenAIResponsesCompactionSession` 都是面向 OpenAI 平台的功能：vLLM 没有 compact 接口；`truncation="auto"` 在 vLLM 里只按 token 截断，而且如果截断会切到图片，vLLM 会直接拒绝请求，不会像 OpenAI 那样丢掉旧条目。
 
@@ -187,11 +191,12 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 ### 4.8 怎样让缓存多命中
 
 1. 让历史只追加：不要改写或删除旧截图，不要改写历史 reasoning（这三个模型在带工具的对话里都保留历史 reasoning，渲染结果是只追加的）。
-2. 同一张截图重发时保持字节完全一致：缓存 data URL 字符串，而不是每次重新编码。
-3. 保持 `detail` 等参数不变，避免影响哈希因子和渲染结果。
-4. 多个 data parallel 引擎时，内置路由按负载而不是按前缀分配请求；用 `X-data-parallel-rank` 请求头把同一条轨迹固定到同一个引擎。
-5. 混合注意力模型可以试试 `--prefix-match-unit`，让命中粒度更细。
-6. 如果要控制上下文长度，优先在一个阶段结束时一次性压缩，而不是每一步都滑动窗口式地改写。
+2. 不要在一条轨迹中途改变工具列表或 reasoning effort：Kimi-K3 和 DeepSeek-V4.1 都把工具定义和 effort 渲染在 prompt 开头，一改就从第一个块开始全部失效。
+3. 同一张截图重发时保持字节完全一致：缓存 data URL 字符串，而不是每次重新编码。
+4. 保持 `detail` 等参数不变，避免影响哈希因子和渲染结果。
+5. 多个 data parallel 引擎时，内置路由按负载而不是按前缀分配请求；用 `X-data-parallel-rank` 请求头把同一条轨迹固定到同一个引擎。
+6. 混合注意力模型可以试试 `--prefix-match-unit`，让命中粒度更细。
+7. 如果要控制上下文长度，优先在一个阶段结束时一次性压缩，而不是每一步都滑动窗口式地改写。
 
 ## 5. Responses API 返回了什么
 
