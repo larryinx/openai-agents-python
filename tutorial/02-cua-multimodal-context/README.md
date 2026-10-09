@@ -218,10 +218,10 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 （数值为示例。字段定义在 `vllm/entrypoints/openai/responses/protocol.py:86`，赋值在 `vllm/entrypoints/openai/responses/serving.py:849`。）
 
 - `input_tokens`：展开后的 prompt 长度，包括所有截图的占位 token。
-- `cached_tokens`：来自 `RequestOutput.num_cached_tokens`，等于本地前缀缓存命中加上 KV connector 的外部命中。Responses API 总是返回它，不需要 `--enable-prompt-tokens-details`。它按块对齐，永远小于 `input_tokens`。
+- `cached_tokens`：来自 `RequestOutput.num_cached_tokens`，等于本地前缀缓存命中加上 KV connector 的外部命中。Responses API 总是返回它，不需要 `--enable-prompt-tokens-details`。它按块对齐，永远小于 `input_tokens`。注意 DeepSeek-V4.1：这个数是在重算滑动窗口之前记录的，包含随后又重算的最多 128 个 token；命中不超过 128 个 token 时会被清零，报告为 0。
 - `cache_write_tokens`：这次请求新写入前缀缓存的整块 token 数。
 - `*_per_turn`、`tool_output_tokens`：vLLM 的扩展字段，只在 gpt-oss 的内置工具循环里有值；对这三个模型，每个 CUA 步骤都是一次独立的 Responses 请求，这些字段为空。
-- `reasoning_tokens`：需要配置 `--reasoning-parser` 才有值。
+- `reasoning_tokens`：需要配置 `--reasoning-parser`，而且该解析器实现了计数才有值。
 - 没有单独的图片 token 数，也没有处理器缓存或编码器缓存的命中信息。Chat Completions 在加了 `--enable-prompt-tokens-details` 后会返回 `prompt_tokens_details.multimodal_tokens`（按模态统计的占位 token 数）。
 
 服务端可观测性：
@@ -231,6 +231,10 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 | KV 前缀缓存命中 | Prometheus `vllm:prefix_cache_queries` / `vllm:prefix_cache_hits`（按 token），日志里的 `Prefix cache hit rate` |
 | 处理器缓存命中 | Prometheus `vllm:mm_cache_queries` / `vllm:mm_cache_hits`（按图片个数），日志里的 `MM cache hit rate` |
 | 实际跑了几次视觉编码器 | `--enable-logging-iteration-details` 打开后，每一步日志里的 `encoder inputs: N, encoder output embeddings: M` |
+
+周期性的统计日志（每 10 秒，`VLLM_LOG_STATS_INTERVAL`）在引擎空闲时以 DEBUG 级别输出，只发一个请求就去找 `Prefix cache hit rate` 这一行，在默认日志级别下可能看不到。
+
+如果多个租户共用一个 vLLM，Responses 请求可以通过 `extra_body={"cache_salt": "..."}` 传入 vLLM 特有的 `cache_salt`：它进入第一个块的哈希，把不同租户的前缀缓存隔开，代价是彼此不能复用。
 
 在 SDK 里，每一步的 `cached_tokens` 会累加到 `result.context_wrapper.usage.input_tokens_details.cached_tokens`，每次请求的明细在 `request_usage_entries`。SDK 归一化 usage 时只保留 `cached_tokens` 和 `cache_write_tokens`，vLLM 的其他扩展字段（例如 Chat Completions 的 `created_cache_tokens`、`multimodal_tokens`）要用 `ModelSettings(preserve_raw_usage=True)` 后从 `result.raw_responses[i].raw_usage` 读取。
 

@@ -503,6 +503,7 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
         <ul>
           <li><code>cached_tokens</code> 在 Responses API 里总是返回，不需要任何启动参数；它等于本地前缀命中加上 KV connector 的外部命中。</li>
           <li>命中按整块计算，并且最多到 <code>input_tokens − 1</code>，所以它永远小于 <code>input_tokens</code>。</li>
+          <li>DeepSeek-V4.1 的 <code>cached_tokens</code> 在重算滑动窗口之前记录，包含随后又重算的最多 128 个 token；命中不超过 128 时报告为 0。</li>
           <li>截图的占位 token 也算在 <code>input_tokens</code> 和 <code>cached_tokens</code> 里，但响应里没有单独的图片 token 数。</li>
           <li>处理器缓存、编码器缓存的命中情况不会出现在任何响应里。要看它们，用 Prometheus 的 <code>vllm:mm_cache_queries</code> / <code>vllm:mm_cache_hits</code>（处理器缓存，按图片个数），或用 <code>--enable-logging-iteration-details</code> 看每一步实际送进编码器的图片数。</li>
           <li>Chat Completions 要加 <code>--enable-prompt-tokens-details</code> 才返回 <code>prompt_tokens_details</code>，其中还有按模态统计的 <code>multimodal_tokens</code>。</li>
