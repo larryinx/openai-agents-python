@@ -193,7 +193,7 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 1. 让历史只追加：不要改写或删除旧截图，不要改写历史 reasoning（这三个模型在带工具的对话里都保留历史 reasoning，渲染结果是只追加的）。
 2. 不要在一条轨迹中途改变工具列表或 reasoning effort：Kimi-K3 和 DeepSeek-V4.1 都把工具定义和 effort 渲染在 prompt 开头，一改就从第一个块开始全部失效。
 3. 同一张截图重发时保持字节完全一致：缓存 data URL 字符串，而不是每次重新编码。
-4. 保持 `detail` 等参数不变，避免影响哈希因子和渲染结果。
+4. 保持请求级的 `mm_processor_kwargs` / `media_io_kwargs` 不变：它们和图片字节一起参与哈希，改了以后同一张截图也会得到新哈希。
 5. 多个 data parallel 引擎时，内置路由按负载而不是按前缀分配请求；用 `X-data-parallel-rank` 请求头把同一条轨迹固定到同一个引擎。
 6. 混合注意力模型可以试试 `--prefix-match-unit`，让命中粒度更细。
 7. 如果要控制上下文长度，优先在一个阶段结束时一次性压缩，而不是每一步都滑动窗口式地改写。
