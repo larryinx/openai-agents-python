@@ -530,7 +530,8 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
         <ul>
           <li>用普通函数工具实现 <code>click</code> / <code>type_text</code> / <code>screenshot</code>，返回 <code>ToolOutputImage</code>。内置的 <code>ComputerTool</code> 需要模型输出 OpenAI 的 <code>computer_call</code>，vLLM 上的开源模型不会产生这种条目。</li>
           <li>用 <code>OpenAIResponsesModel</code> 连 vLLM 的 <code>/v1/responses</code>，截图会留在 <code>function_call_output</code> 里。</li>
-          <li>给 <code>ToolOutputImage</code> 设置 <code>detail="auto"</code>。vLLM 校验工具结果里的 <code>input_image</code> 时要求有 <code>detail</code>，而 SDK 在它为空时不发送这个字段。</li>
+          <li>给 <code>ToolOutputImage</code> 设置 <code>detail="auto"</code>。vLLM 校验工具结果里的 <code>input_image</code> 时要求有 <code>detail</code>，而 SDK 在它为空时不发送这个字段。vLLM 不使用它的取值。</li>
+          <li>工具返回列表时，文字部分用 <code>ToolOutputText</code>。只要列表里混进一个普通字符串，整个列表都会被转成字符串，base64 会变成文本 token。</li>
           <li>让历史只追加不改写，前缀缓存才能覆盖旧截图。</li>
         </ul>
       </div>
@@ -541,6 +542,7 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
           <li>“只保留最近 N 张截图”的过滤器能控制上下文长度，但每次改写都会让前缀缓存从第一张被改写的截图处失效。</li>
           <li>SDK 不会自动裁剪旧截图；<code>RunState</code> 序列化时每张截图的 base64 会出现 4 次，Session 也会保存完整 base64。</li>
           <li>多个 data parallel 引擎时，同一条轨迹的请求可能被路由到不同引擎而丢失缓存，可以用 <code>X-data-parallel-rank</code> 请求头固定。</li>
+          <li><code>previous_response_id</code> 在默认 vLLM 上不可用（需要 <code>VLLM_ENABLE_RESPONSES_API_STORE=1</code>），让 SDK 每次发送完整历史。</li>
         </ul>
       </div>
     </div>

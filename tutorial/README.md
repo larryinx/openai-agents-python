@@ -15,6 +15,7 @@
 | 课 | 问题 | 内容 |
 | --- | --- | --- |
 | 01 | 模型输出的 reasoning 会不会保留在轨迹里，并在下一步解码时出现在上下文中？ | [01-reasoning-in-trajectory](01-reasoning-in-trajectory/README.md) |
+| 02 | computer-use agent 的截图工具结果在上下文里长什么样？图片怎么变成嵌入？vLLM 的多模态缓存怎样命中？ | [02-cua-multimodal-context](02-cua-multimodal-context/README.md) |
 
 ## 如何运行示例脚本
 
@@ -23,9 +24,10 @@
 ```bash
 make sync
 uv run python tutorial/01-reasoning-in-trajectory/probe_reasoning_replay.py
+uv run python tutorial/02-cua-multimodal-context/probe_cua_context.py
 ```
 
-脚本用一个伪造的 OpenAI 兼容服务器记录 SDK 发出的真实请求体，所以不会产生任何网络请求或费用。
+这些脚本用一个伪造的 OpenAI 兼容服务器记录 SDK 发出的真实请求体，所以不会产生任何网络请求或费用。
 
 ## 说明
 
