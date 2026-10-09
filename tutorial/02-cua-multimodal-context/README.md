@@ -111,7 +111,7 @@ D. Responses API，用 call_model_input_filter 只保留最近一张截图
 
 ### 3.1 从请求到 token 序列
 
-1. **解析**：`input_image` 与 `image_url` 共用一个解析器（`vllm/entrypoints/chat_utils.py:1653`）。data URL 必须是 base64，解码后由 PIL 打开；原始字节会被保留下来用于计算哈希。
+1. **解析**：`input_image` 与 `image_url` 共用一个解析器（`vllm/entrypoints/chat_utils.py:1653`）。data URL 必须是 base64，在线程池里解码后由 PIL 打开（`VLLM_IMAGE_FETCH_TIMEOUT` 只作用于 HTTP 图片地址，对 data URL 无效）；原始字节会被保留下来用于计算哈希。
 2. **渲染**：每个模型用自己的渲染器。Kimi-K3 用 `KimiK3Renderer` 和官方的 `encoding_k3` 编码器，图片先变成字符串占位符 `<|kimi_image_placeholder|>`；DeepSeek-V4.1 用 Python 编码器，把每张图变成 `<｜deepseek_image｜>`，并把 tool 消息并入 user 回合的 `<tool_result>` 块。此时每张图只有 1 个占位符。
 3. **展开**：多模态处理器运行图片预处理，然后把 1 个占位符替换成 N 个占位 token（`vllm/multimodal/processing/processor.py` 中的 `PromptReplacement`），并记录每张图的 `PlaceholderRange(offset, length, is_embed)`。（细节：Kimi-K3 的 `<|kimi_image_placeholder|>` 不是特殊 token，后面紧跟换行时会和换行合并成一个 BPE token，token 级匹配失败，vLLM 会退回到“解码整段 prompt、做文本替换、再重新编码”的路径。这一点来自代码阅读和离线分词复现，没有在真实服务上验证。）
 4. **送进引擎**：`EngineCoreRequest` 携带展开后的 `prompt_token_ids` 和按位置排序的 `mm_features`（每张图一个：`mm_hash`、位置区间、预处理后的张量；处理器缓存命中时张量为空）。
@@ -128,7 +128,7 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 
 - 文本 token 的输入向量来自词表嵌入矩阵的一行，同一个 id 永远得到同一个向量。
 - 图片位置的 id 只是占位符，同一模型的所有截图共用一个 id。真正的内容来自 `embed_multimodal`：ViT 把 14×14 像素的 patch 编码成向量，相邻 patch 被合并（Kimi 2×2，DeepSeek 3×3），再经过投影层变成 LLM 的隐藏维度（Kimi-K3 是 7,168，DeepSeek-V4.1 是 5,120）。每张图的每个位置都是新算出来的连续向量，没有一个“图片词表”。
-- 覆盖之后，LLM 不再区分文字和图片：每个位置都计算 K/V，写进分页 KV 块，参与注意力，也计入 `usage.input_tokens`。
+- 覆盖之后，LLM 不再区分文字和图片：全注意力（或 MLA）层为每个位置计算 K/V 并写进分页 KV 块；线性注意力层（Qwen3.8 的 Gated DeltaNet、Kimi-K3 的 KDA）则把每个位置吸收到一个固定大小的循环状态里。图片位置同样计入 `usage.input_tokens`。
 - 位置编码方面，这三个模型都用普通的一维位置，每个图片 token 占一个位置。Qwen-VL 系列那种三维的 M-RoPE 只在模型配置里有 `mrope_section` 时启用：Qwen3.8 的模型类虽然支持 M-RoPE，但它的 `config.json` 没有这个字段；Kimi-K3 和 DeepSeek-V4.1 的模型类不支持 M-RoPE。
 
 ## 4. 三层缓存
@@ -163,7 +163,7 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 调度器只为占位区间与本步要计算的区间 `[num_computed_tokens, num_computed_tokens + num_new_tokens)` 重叠的图片调度编码器（`vllm/v1/core/sched/scheduler.py:1741` 的 `_try_schedule_encoder_inputs`），而 `num_computed_tokens` 已经包含了前缀命中。所以：
 
 - 完全落在命中区间里的旧截图：不跑 ViT，也不查编码器缓存，像素数据甚至不会被送到 GPU。
-- 跨过命中边界的截图：需要它的完整嵌入，先查编码器缓存，未命中才重跑 ViT。
+- 跨过命中边界的截图：需要它的完整嵌入（视觉编码器是双向注意力，不能只算一半），先查编码器缓存，未命中才重跑整张图的 ViT；如果编码器预算或缓存放不下，这个请求在这一步就无法前进。
 - 新截图：处理器缓存未命中 → 运行图片预处理；编码器缓存未命中 → 运行 ViT；然后 prefill。
 
 ### 4.6 两种特殊注意力结构
@@ -261,7 +261,13 @@ flowchart TB
     C3 -- "EngineCoreOutput + PrefillStats" --> A9
 ```
 
-每一步 CUA 动作都是一次新的 HTTP 请求；除了上述缓存，服务端不为这条轨迹保留任何状态。
+每一步 CUA 动作都是一次新的 HTTP 请求；除了上述缓存，服务端不为这条轨迹保留任何状态（请求里的 `session_id` / `X-Session-ID` 只用来给 KV cache 事件打标签，不会保留 KV）。
+
+几个运行时细节：
+
+- EngineCore 默认开启异步调度（`async_scheduling`），循环是 `step_with_batch_queue`：GPU 在跑第 N 批的时候，调度器已经在安排第 N+1 批。
+- 多卡时每个 GPU worker 有自己的编码器缓存；Kimi-K3 和 DeepSeek-V4.1 支持 `--mm-encoder-tp-mode data`，让视觉编码器在 TP 各卡上按数据并行运行。
+- 单卡（`world_size == 1`）时 GPU worker 就在 EngineCore 进程里运行，没有单独的 worker 进程。
 
 ## 7. 小结
 

@@ -312,7 +312,7 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
           <!-- LLM -->
           <line x1="281" y1="274" x2="281" y2="306" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
           <rect x="20" y="310" width="522" height="40" rx="6" fill="none" stroke="currentColor"/>
-          <text x="281" y="335" text-anchor="middle" font-size="12" fill="currentColor">LLM 各层：每个位置（文字或图片）都算出 K/V，写进分页 KV 块</text>
+          <text x="281" y="335" text-anchor="middle" font-size="12" fill="currentColor">LLM 各层：注意力层为每个位置写 K/V；线性注意力层更新固定大小的状态</text>
           <line x1="542" y1="330" x2="640" y2="330" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
           <g>
             <rect x="644" y="314" width="28" height="32" rx="3" fill="var(--hit)" opacity="0.7"/>
@@ -325,7 +325,7 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
           <text x="810" y="344" font-size="10.5" fill="var(--muted)">哈希 = (父块, token id, [mm_hash, 偏移])</text>
         </svg>
       </div>
-      <figcaption>图片位置的 token id 只是占位符，同一模型的所有截图用同一个 id。真正携带图像内容的是视觉编码器输出的连续向量，它们在 <code>embed_input_ids</code> 里覆盖掉查表结果。之后 LLM 对这些位置的处理和文字完全相同，所以截图会像文字一样占用上下文长度、KV cache 和 <code>usage.input_tokens</code>。</figcaption>
+      <figcaption>图片位置的 token id 只是占位符，同一模型的所有截图用同一个 id。真正携带图像内容的是视觉编码器输出的连续向量，它们在 <code>embed_input_ids</code> 里覆盖掉查表结果。之后 LLM 对这些位置的处理和文字完全相同，所以截图会像文字一样占用上下文长度、KV cache 和 <code>usage.input_tokens</code>。Qwen3.8 和 Kimi-K3 是混合模型，其中的线性注意力层不按 token 存 K/V，而是把整段序列压进一个固定大小的状态。</figcaption>
     </figure>
   </section>
 
@@ -471,7 +471,7 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
           <text x="966" y="364" font-size="11" fill="var(--muted)">API server</text>
         </svg>
       </div>
-      <figcaption>绿色是 KV 前缀缓存和处理器缓存，紫色是编码器缓存。每一步 CUA 动作都是一次新的 HTTP 请求，服务端除了这些缓存之外不保留会话状态。截图的像素在 API server 里被解码和哈希；完全落在前缀命中区间里的截图，像素数据在调度后就被丢掉，不会送到 GPU，视觉编码器也不会运行。</figcaption>
+      <figcaption>绿色是 KV 前缀缓存和处理器缓存，紫色是编码器缓存。每一步 CUA 动作都是一次新的 HTTP 请求，服务端除了这些缓存之外不保留会话状态。EngineCore 默认异步调度：GPU 执行第 N 批时，调度器已经在安排第 N+1 批。截图的像素在 API server 里被解码和哈希；完全落在前缀命中区间里的截图，像素数据在调度后就被丢掉，不会送到 GPU，视觉编码器也不会运行。</figcaption>
     </figure>
   </section>
 
