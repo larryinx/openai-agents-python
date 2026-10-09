@@ -11,7 +11,7 @@
 配套材料：
 
 - [`probe_cua_context.py`](probe_cua_context.py)：不需要 API key 和 GPU 的验证脚本。它运行一个用自定义工具返回截图的 agent，打印 SDK 每一步真正发给服务器的请求体。
-- [`screenshot-in-vllm.html`](screenshot-in-vllm.html)：交互式图解。可以切换模型、截图分辨率和 harness 策略，按比例看每一次请求的上下文、前缀缓存命中和编码器调度。
+- [`screenshot-in-vllm.html`](screenshot-in-vllm.html)：交互式图解。可以切换模型、截图分辨率和 harness 策略，按比例看每一次请求的上下文、前缀缓存命中和编码器调度。在线版本：[截图在 vLLM 里的一生](https://claude.ai/artifact/Sy9Th4qXVatxzSqqvr389i)（私有链接，需要所有者分享后他人才能打开）。
 
 源码版本：Agents SDK `bc3596a`，vLLM `8a23646`。下文的 `src/agents/...` 路径属于本仓库，`vllm/...` 路径属于 vLLM 仓库。
 
@@ -34,6 +34,26 @@
 - **Qwen3.8-2.4T-A95B**：`config.json` 里没有 `vision_config`，README 写明 “Multimodal inputs are not supported”；它的 chat template 遇到非文本内容会抛出 `Unexpected item type in content.`；在 vLLM 里给纯文本模型发图片会得到 `... is not a multimodal model`（HTTP 400）。要么给它文字观察（可访问性树、OCR），要么换同系列带视觉的 Qwen3.8-27B（`Qwen3_5ForConditionalGeneration`）。
 - **Kimi-K3**：启动时需要 `--trust-remote-code`（分词器和图片处理器来自模型仓库）。token 数 = ⌈H/28⌉ × ⌈W/28⌉（不超过 65,536 个 patch、每边不超过 512 个 patch 时不缩放，只补边到 28 的倍数，见 `vllm/models/kimi_k3/common/mm_preprocess.py`）。每张图写成 `<|media_begin|>image 1920x1080<|media_content|>` + 2,691 × `<|media_pad|>` + `<|media_end|>`，只有 `<|media_pad|>`（id 163605）的位置被视觉向量覆盖；起止标记和 `image 1920x1080` 这段文字仍然查词表，而且文字用的是原始分辨率，不同分辨率的截图连这几个普通 token 也不同。
 - **DeepSeek-V4.1-Flash**：先补边到 14 的倍数，网格 = ⌈(H/14)/3⌉ × ⌈(W/14)/3⌉，token 数 = 行 × (列 + 1) + 2（每行末尾一个换行位置，首尾各一个）。超过 1,024 时按比例缩小：1920×1080 先缩到 1708×966，得到 23 × 41 网格、968 个 token（`vllm/models/deepseek_v41/common/mm_preprocess.py:71`）。所有位置的 id 都是 129264，连起止和换行位置的向量也来自视觉部分，而不是词表。
+
+### 1.1 vLLM 启动参数
+
+harness 要能拿到结构化的工具调用，vLLM 必须打开自动工具选择并指定该模型的工具解析器，否则模型输出的工具调用标记会原样作为文本返回。思考内容要单独拿出来，还需要推理解析器。下面只列出和本课相关的参数，并行度、量化等部署参数省略：
+
+```bash
+# Kimi-K3：分词器和图片处理器来自模型仓库，需要 --trust-remote-code
+vllm serve moonshotai/Kimi-K3 --trust-remote-code \
+  --enable-auto-tool-choice --tool-call-parser kimi_k3 --reasoning-parser kimi_k3
+
+# DeepSeek-V4.1-Flash：预处理已经移植进 vLLM，不需要 --trust-remote-code
+vllm serve deepseek-ai/DeepSeek-V4.1-Flash \
+  --enable-auto-tool-choice --tool-call-parser deepseek_v41 --reasoning-parser deepseek_v41
+
+# Qwen3.8-2.4T-A95B：纯文本，只能用文字观察
+vllm serve Qwen/Qwen3.8-2.4T-A95B \
+  --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3
+```
+
+另外，SDK 默认给函数工具发送 `"strict": true`。只要有一个工具是 strict 的，vLLM 就会为工具调用构建结构化约束，按参数 schema 做约束解码（`--tool-strict-level auto`，默认开启）。这会影响生成，不影响缓存。
 
 ## 2. Harness 侧：截图在 SDK 里是什么
 
@@ -153,7 +173,7 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 
 - 位置：GPU worker 显存里的 `encoder_outputs[mm_hash]`，由 EngineCore 的 `EncoderCacheManager` 记账（`vllm/v1/core/encoder_cache_manager.py:19`）。
 - 跨请求共享。请求结束后条目变成“可释放”，但不会立即删除，直到新分配需要空间时才被淘汰。
-- 容量以嵌入个数计，不能直接配置：max(`max_num_batched_tokens`, 单张图最大 token 数)。OpenAI 服务在 H100 这类卡上默认 `max_num_batched_tokens=8192`：DeepSeek-V4.1 单图最多 1,024 个，所以容量是 8,192，约 8 张 1080p 截图；Kimi-K3 单图最多约 16,384 个，容量随之变成约 16,384，约 6 张 1080p 截图。大规模专家并行（DeepEP 低延迟等批量 DP MoE 配置）下 `max_num_batched_tokens` 默认只有 256，编码器缓存会小到只能放一张图。
+- 容量以嵌入个数计，不能直接配置：max(`max_num_batched_tokens`, 单张图最大 token 数)。OpenAI 服务在 H100 这类卡上默认 `max_num_batched_tokens=8192`：DeepSeek-V4.1 单图最多 1,024 个，所以容量是 8,192，约 8 张 1080p 截图；Kimi-K3 单图最多 16,817 个（vLLM 启动时用最坏尺寸的图片做 profiling），容量随之变成 16,817，约 6 张 1080p 截图。大规模专家并行（DeepEP 低延迟等批量 DP MoE 配置）下 `max_num_batched_tokens` 默认只有 256，编码器缓存会小到只能放一张图。
 
 ### 4.4 KV 前缀缓存
 
@@ -169,6 +189,7 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 - 完全落在命中区间里的旧截图：不跑 ViT，也不查编码器缓存，像素数据甚至不会被送到 GPU。
 - 跨过命中边界的截图：需要它的完整嵌入（视觉编码器是双向注意力，不能只算一半），先查编码器缓存，未命中才重跑整张图的 ViT；如果编码器预算或缓存放不下，这个请求在这一步就无法前进。
 - 新截图：处理器缓存未命中 → 运行图片预处理；编码器缓存未命中 → 运行 ViT；然后 prefill。
+- 和上一张字节完全相同的新截图（例如一次没有改变画面的点击）：哈希相同，处理器缓存和编码器缓存都会命中（只要条目还没被淘汰），但它在序列里的新位置仍然要做 prefill，因为 KV 块哈希是链式的，而且位置不同。
 
 ### 4.6 两种特殊注意力结构
 
