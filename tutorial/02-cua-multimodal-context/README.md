@@ -144,10 +144,10 @@ D. Responses API，用 call_model_input_filter 只保留最近一张截图
 
 ```python
 # vllm/model_executor/models/interfaces.py:511 附近（节选）
-inputs_embeds = self._embed_text_input_ids(input_ids, ...)   # 先对所有 id 查词表
+inputs_embeds = self._embed_text_input_ids(input_ids, ...)  # 先对所有 id 查词表
 ...
 # vllm/model_executor/models/utils.py:723
-inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编码器的输出覆盖图片位置
+inputs_embeds[is_multimodal] = mm_embeds_flat  # 再用视觉编码器的输出覆盖图片位置
 ```
 
 - 文本 token 的输入向量来自词表嵌入矩阵的一行，同一个 id 永远得到同一个向量。
