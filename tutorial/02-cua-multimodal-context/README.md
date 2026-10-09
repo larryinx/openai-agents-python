@@ -32,7 +32,7 @@
 | DeepSeek-V4.1-Flash | `DeepseekV41ForCausalLM`（vLLM 中注册为多模态） | 能（DeepSeek ViT，patch 14，3×3 下采样） | 578 / 968（上限 1,024） | 128 token 滑动窗口 + 压缩稀疏 MLA |
 
 - **Qwen3.8-2.4T-A95B**：`config.json` 里没有 `vision_config`，README 写明 “Multimodal inputs are not supported”；它的 chat template 遇到非文本内容会抛出 `Unexpected item type in content.`；在 vLLM 里给纯文本模型发图片会得到 `... is not a multimodal model`（HTTP 400）。要么给它文字观察（可访问性树、OCR），要么换同系列带视觉的 Qwen3.8-27B（`Qwen3_5ForConditionalGeneration`）。
-- **Kimi-K3**：token 数 = ⌈H/28⌉ × ⌈W/28⌉（不超过 65,536 个 patch、每边不超过 512 个 patch 时不缩放，只补边到 28 的倍数，见 `vllm/models/kimi_k3/common/mm_preprocess.py`）。每张图写成 `<|media_begin|>image 1920x1080<|media_content|>` + 2,691 × `<|media_pad|>` + `<|media_end|>`，只有 `<|media_pad|>`（id 163605）的位置被视觉向量覆盖。
+- **Kimi-K3**：启动时需要 `--trust-remote-code`（分词器和图片处理器来自模型仓库）。token 数 = ⌈H/28⌉ × ⌈W/28⌉（不超过 65,536 个 patch、每边不超过 512 个 patch 时不缩放，只补边到 28 的倍数，见 `vllm/models/kimi_k3/common/mm_preprocess.py`）。每张图写成 `<|media_begin|>image 1920x1080<|media_content|>` + 2,691 × `<|media_pad|>` + `<|media_end|>`，只有 `<|media_pad|>`（id 163605）的位置被视觉向量覆盖；起止标记和 `image 1920x1080` 这段文字仍然查词表，而且文字用的是原始分辨率，不同分辨率的截图连这几个普通 token 也不同。
 - **DeepSeek-V4.1-Flash**：先补边到 14 的倍数，网格 = ⌈(H/14)/3⌉ × ⌈(W/14)/3⌉，token 数 = 行 × (列 + 1) + 2（每行末尾一个换行位置，首尾各一个）。超过 1,024 时按比例缩小：1920×1080 先缩到 1708×966，得到 23 × 41 网格、968 个 token（`vllm/models/deepseek_v41/common/mm_preprocess.py:71`）。所有位置的 id 都是 129264，连起止和换行位置的向量也来自视觉部分，而不是词表。
 
 ## 2. Harness 侧：截图在 SDK 里是什么
@@ -62,7 +62,7 @@ SDK 把返回值转换成 Responses 格式的 `function_call_output`，`output` 
 
 > **坑：列表里的每个元素都必须是结构化输出。** 只有当列表中所有元素都是 `ToolOutputText` / `ToolOutputImage` / `ToolOutputFileContent`（或带 `type` 的等价 dict）时，SDK 才会把它当作内容列表（`src/agents/items.py:965`）。如果写成 `["已点击", ToolOutputImage(...)]`，整个列表会被 `str()` 成一段文字，base64 会作为普通文本 token 发给模型。文字部分请用 `ToolOutputText`。
 
-> **坑：一定要设置 `detail`。** SDK 只在 `detail` 不为空时才发送这个字段。vLLM 只给 user 消息 `content` 里的图片补默认值 `detail="auto"`（`vllm/entrypoints/openai/responses/protocol.py:139`），工具结果 `output` 里的图片不会补；而 vLLM 解析 `input_image` 时用 `ResponseInputImageParam` 校验，其中 `detail` 是必填字段（`vllm/entrypoints/chat_utils.py:1645`）。缺少 `detail` 的截图会导致校验失败、请求返回 400。vLLM 并不使用 `detail` 的取值（不影响缩放和 token 数），所以设成 `"auto"` 即可。
+> **坑：一定要设置 `detail`。** SDK 只在 `detail` 不为空时才发送这个字段。vLLM 只给 user 消息 `content` 里的图片补默认值 `detail="auto"`（`vllm/entrypoints/openai/responses/protocol.py:139`），工具结果 `output` 里的图片不会补；而 vLLM 解析 `input_image` 时用 `ResponseInputImageParam` 校验，其中 `detail` 是必填字段（`vllm/entrypoints/chat_utils.py:1639`）。缺少 `detail` 的截图会导致校验失败、请求返回 400。vLLM 并不使用 `detail` 的取值（不影响缩放和 token 数），所以设成 `"auto"` 即可。
 
 ### 2.3 Responses 与 Chat Completions 的差别
 
@@ -113,7 +113,7 @@ D. Responses API，用 call_model_input_filter 只保留最近一张截图
 
 1. **解析**：`input_image` 与 `image_url` 共用一个解析器（`vllm/entrypoints/chat_utils.py:1653`）。data URL 必须是 base64，解码后由 PIL 打开；原始字节会被保留下来用于计算哈希。
 2. **渲染**：每个模型用自己的渲染器。Kimi-K3 用 `KimiK3Renderer` 和官方的 `encoding_k3` 编码器，图片先变成字符串占位符 `<|kimi_image_placeholder|>`；DeepSeek-V4.1 用 Python 编码器，把每张图变成 `<｜deepseek_image｜>`，并把 tool 消息并入 user 回合的 `<tool_result>` 块。此时每张图只有 1 个占位符。
-3. **展开**：多模态处理器运行图片预处理，然后把 1 个占位符替换成 N 个占位 token（`vllm/multimodal/processing/processor.py` 中的 `PromptReplacement`），并记录每张图的 `PlaceholderRange(offset, length, is_embed)`。
+3. **展开**：多模态处理器运行图片预处理，然后把 1 个占位符替换成 N 个占位 token（`vllm/multimodal/processing/processor.py` 中的 `PromptReplacement`），并记录每张图的 `PlaceholderRange(offset, length, is_embed)`。（细节：Kimi-K3 的 `<|kimi_image_placeholder|>` 不是特殊 token，后面紧跟换行时会和换行合并成一个 BPE token，token 级匹配失败，vLLM 会退回到“解码整段 prompt、做文本替换、再重新编码”的路径。这一点来自代码阅读和离线分词复现，没有在真实服务上验证。）
 4. **送进引擎**：`EngineCoreRequest` 携带展开后的 `prompt_token_ids` 和按位置排序的 `mm_features`（每张图一个：`mm_hash`、位置区间、预处理后的张量；处理器缓存命中时张量为空）。
 
 ### 3.2 嵌入：不是查词表
@@ -129,7 +129,7 @@ inputs_embeds[is_multimodal] = mm_embeds_flat                # 再用视觉编�
 - 文本 token 的输入向量来自词表嵌入矩阵的一行，同一个 id 永远得到同一个向量。
 - 图片位置的 id 只是占位符，同一模型的所有截图共用一个 id。真正的内容来自 `embed_multimodal`：ViT 把 14×14 像素的 patch 编码成向量，相邻 patch 被合并（Kimi 2×2，DeepSeek 3×3），再经过投影层变成 LLM 的隐藏维度（Kimi-K3 是 7,168，DeepSeek-V4.1 是 5,120）。每张图的每个位置都是新算出来的连续向量，没有一个“图片词表”。
 - 覆盖之后，LLM 不再区分文字和图片：每个位置都计算 K/V，写进分页 KV 块，参与注意力，也计入 `usage.input_tokens`。
-- 位置编码方面，这三个模型都用普通的一维位置，每个图片 token 占一个位置；Qwen-VL 系列那种三维的 M-RoPE 只用于声明了 `mrope_section` 的模型。
+- 位置编码方面，这三个模型都用普通的一维位置，每个图片 token 占一个位置。Qwen-VL 系列那种三维的 M-RoPE 只在模型配置里有 `mrope_section` 时启用：Qwen3.8 的模型类虽然支持 M-RoPE，但它的 `config.json` 没有这个字段；Kimi-K3 和 DeepSeek-V4.1 的模型类不支持 M-RoPE。
 
 ## 4. 三层缓存
 
