@@ -146,7 +146,7 @@ header { display: grid; gap: 16px; }
 .chip.enc { color: var(--encoder); background: var(--encoder-bg); border-color: transparent; }
 .chip.vit { color: var(--compute); background: var(--compute-bg); border-color: transparent; }
 .chip.err { color: var(--danger); background: var(--danger-bg); border-color: transparent; }
-.totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 10px; }
+.totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 10px; }
 .totals > div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; display: grid; gap: 2px; min-width: 0; }
 .totals .k { font-size: 12px; color: var(--muted); }
 .totals .v { font-family: var(--font-mono); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -178,6 +178,8 @@ th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--lin
 th { font-weight: 500; font-size: 12px; color: var(--muted); background: var(--surface-2); }
 tr:last-child td { border-bottom: 0; }
 td code { font-size: 12px; }
+.cache-table td:first-child { min-width: 190px; }
+.cache-table td:first-child code { white-space: nowrap; }
 .yes { color: var(--hit); font-weight: 500; }
 .no { color: var(--danger); font-weight: 500; }
 
@@ -332,7 +334,7 @@ footer { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--lin
   <section aria-labelledby="cache-title">
     <h2 id="cache-title">三层缓存</h2>
     <div class="table-wrap">
-      <table>
+      <table class="cache-table">
         <thead><tr><th>缓存</th><th>在哪里</th><th>键</th><th>命中时省掉什么</th><th>CUA 轨迹中何时命中</th></tr></thead>
         <tbody>
           <tr><td><b>多模态处理器缓存</b><br><code>--mm-processor-cache-gb 4</code></td><td>API server 进程（P0，只存元数据）+ EngineCore 进程（P1，存张量），CPU 内存</td><td><code>mm_hash</code> = blake3(模型名, 原始图片字节)</td><td>HF 图像预处理（resize、切 patch），以及通过 IPC 再传一遍像素张量</td><td>每次请求重新发来的旧截图都会命中；只有最新一张未命中。base64 解码和哈希每次仍会执行</td></tr>
